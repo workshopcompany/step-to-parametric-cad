@@ -1,0 +1,5 @@
+# OCP (OpenCascade bindings, as shipped with build123d)
+OCP>=7.8
+Pillow>=10
+matplotlib>=3.8
+numpy>=1.26

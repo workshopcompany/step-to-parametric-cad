@@ -159,6 +159,21 @@ at built Z = assembly Z − datum Z.
 (`volume_pct`, `ct_mean`, `iso_mean`, `n_fail_slices`, `deficit`),
 and `failures`.
 
+## Seeing the results (visual report)
+
+Every run leaves images you can look at — the intermediate
+results and the final result, with your own eyes:
+
+- `features.png` — the recognized features in top view (stage 1's
+  output: blue = profile, red dashed = hole, name + Z range).
+- `iter_<n>/` — one folder per iteration: the 4 shaded iso views
+  of that iteration's built model + its `model.step`. The verify
+  renders (`iso_check_built/`) are overwritten each round, so the
+  snapshot is what keeps the intermediate results visible.
+- `report.html` — one page showing it all: recognized features,
+  every iteration's preview + metrics, the final (best) model,
+  verification detail, and the failure analysis.
+
 ## Example: motor cradle (HD60-32)
 
 - Iteration 0: volume +5.495%, CT mean 0.870, 41 failing slices.

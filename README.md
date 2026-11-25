@@ -76,6 +76,23 @@ Outputs in `--out`:
 - `ct/` — CT slice PNGs + `slices.json` (with `--ct`).
 - `iso/` — isometric views + montage (with `--iso`).
 
+## Seeing the results (visual report)
+
+Every run leaves images you can look at, so you can see the
+intermediate results and the final result with your own eyes:
+
+- `features.png` — the recognized features in top view (blue =
+  profile, red dashed = hole), each labelled with its name + Z
+  range. What stage 1 read from the STEP.
+- `iter_<n>/` — one folder per iteration, each with the 4 shaded
+  iso views of that iteration's built model + its `model.step`.
+  Intermediate results are kept, never overwritten by the next
+  iteration.
+- `report.html` — open this one file and you see it all: the
+  recognized features, every iteration's preview + metrics, the
+  final (best) model, the verification detail, and what is still
+  wrong and where.
+
 ## Pass criteria
 
 The verdict is PASS only when **volume** (error < 0.5%), **iso

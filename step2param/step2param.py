@@ -1143,6 +1143,205 @@ def verify_built(built_step, orig_feature_list):
 # ---------------------------------------------------------------------------
 
 
+def _plot_features(feature_list, out_path):
+    """Draw the recognized features in top view (XY), so the user can
+    SEE what stage 1 recognized. Profiles are blue solid lines, holes
+    are red dashed lines, each labelled with its name + Z range. This
+    is the intermediate result of recognize() -- the outline IS the
+    feature, so the plot shows exactly what will be sketched.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_aspect("equal")
+    ax.set_title("Recognized features (top view, global XY)")
+    ax.set_xlabel("X (mm)")
+    ax.set_ylabel("Y (mm)")
+    ax.grid(True, alpha=0.3)
+    feats = feature_list.get("features", [])
+    for feat in feats:
+        ftype = feat.get("type")
+        name = feat.get("name", "?")
+        z0, z1 = feat.get("zmin", 0), feat.get("zmax", 0)
+        color = "blue" if ftype == "profile" else "red"
+        ls = "-" if ftype == "profile" else "--"
+        label = "%s (Z %.2f..%.2f)" % (name, z0, z1)
+        cx, cy = None, None
+        for e in feat.get("outline", []):
+            k = e.get("kind")
+            if k == "line":
+                xs = [e["p1"][0], e["p2"][0]]
+                ys = [e["p1"][1], e["p2"][1]]
+                ax.plot(xs, ys, color=color, linestyle=ls, linewidth=1.5)
+                cx, cy = sum(xs) / 2, sum(ys) / 2
+            elif k == "circle":
+                th = np.linspace(0, 2 * np.pi, 100)
+                xs = e["centre"][0] + e["radius"] * np.cos(th)
+                ys = e["centre"][1] + e["radius"] * np.sin(th)
+                ax.plot(xs, ys, color=color, linestyle=ls, linewidth=1.5)
+                cx, cy = e["centre"]
+            elif k == "arc":
+                a0, a1 = math.radians(e["a0"]), math.radians(e["a1"])
+                if a1 <= a0:
+                    a1 += 2 * np.pi
+                th = np.linspace(a0, a1, max(10, int((a1 - a0) / 0.05)))
+                xs = e["centre"][0] + e["radius"] * np.cos(th)
+                ys = e["centre"][1] + e["radius"] * np.sin(th)
+                ax.plot(xs, ys, color=color, linestyle=ls, linewidth=1.5)
+                cx, cy = e["centre"]
+        # label at the feature centre
+        c = feat.get("centre")
+        if c:
+            ax.annotate(label, (c[0], c[1]), fontsize=7,
+                        color=color, ha="center")
+        elif cx is not None:
+            ax.annotate(label, (cx, cy), fontsize=7,
+                        color=color, ha="center")
+    # legend
+    from matplotlib.lines import Line2D
+    ax.legend(handles=[
+        Line2D([0], [0], color="blue", label="profile (additive)"),
+        Line2D([0], [0], color="red", linestyle="--", label="hole (subtractive)"),
+    ], fontsize=8, loc="upper right")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+    return out_path
+
+
+def _write_report(out_dir, feature_list, history, best_it, status,
+                  status_msg):
+    """Write report.html: ONE page where the user can SEE the
+    intermediate results (recognized features, every iteration) and
+    the final result (the best iteration's model). All images are
+    relative paths inside out_dir, so the report works when opened
+    from the output folder.
+    """
+    import html as _html
+
+    def _rel(p):
+        return os.path.relpath(p, out_dir).replace(os.sep, "/")
+
+    def _exists(p):
+        return os.path.exists(os.path.join(out_dir, p))
+
+    def _m(m, key, fmt="%.3f"):
+        v = m.get(key)
+        return (fmt % v) if v is not None else "-"
+
+    fl = feature_list
+    vol = fl.get("volume_mm3")
+    bbox = fl.get("bbox")
+    n_feat = len(fl.get("features", []))
+    rr = fl.get("refine_report", {})
+    parts = []
+    parts.append("<!DOCTYPE html><html><head><meta charset='utf-8'>")
+    parts.append("<title>step2param report</title>")
+    parts.append("<style>body{font-family:sans-serif;max-width:900px;"
+                 "margin:20px auto;padding:0 16px;color:#222}"
+                 "h1{font-size:22px}h2{font-size:18px;margin-top:28px}"
+                 "img{max-width:100%;border:1px solid #ccc}"
+                 "table{border-collapse:collapse}"
+                 "td,th{border:1px solid #ccc;padding:4px 10px;"
+                 "text-align:right}th{text-align:left}"
+                 ".ok{color:green}.fail{color:red}</style></head><body>")
+    parts.append("<h1>step2param report</h1>")
+    parts.append("<p>Status: <b>%s</b> — %s</p>"
+                 % (_html.escape(str(status)),
+                    _html.escape(str(status_msg))))
+    parts.append("<p>Original volume: %s mm^3, bbox: %s, "
+                 "features recognized: %d, best iteration: %d</p>"
+                 % (vol, bbox, n_feat, best_it))
+    # --- recognized features (intermediate result of stage 1)
+    parts.append("<h2>1. Recognized features (stage 1)</h2>")
+    parts.append("<p>What the program read from the STEP. Blue = profile "
+                 "(additive), red dashed = hole (subtractive). "
+                 "Each outline is exactly what will be sketched.</p>")
+    if _exists("features.png"):
+        parts.append("<img src='features.png' alt='recognized features'>")
+    parts.append("<table><tr><th>name</th><th>type</th><th>Z min</th>"
+                 "<th>Z max</th><th>edges</th></tr>")
+    for f in fl.get("features", []):
+        parts.append("<tr><td>%s</td><td>%s</td><td>%.2f</td><td>%.2f</td>"
+                     "<td>%d</td></tr>"
+                     % (_html.escape(str(f.get("name"))),
+                        _html.escape(str(f.get("type"))),
+                        f.get("zmin", 0), f.get("zmax", 0),
+                        len(f.get("outline", []))))
+    parts.append("</table>")
+    # --- per-iteration results (intermediate results of the loop)
+    parts.append("<h2>2. Iterations (build + verify, each round)</h2>")
+    parts.append("<p>Every iteration's built model is kept in "
+                 "iter_&lt;n&gt;/ (preview + model.step), so the "
+                 "intermediate results stay visible even after the "
+                 "loop moves on.</p>")
+    parts.append("<table><tr><th>iter</th><th>volume %</th>"
+                 "<th>CT mean</th><th>iso mean</th>"
+                 "<th>fail slices</th><th>deficit</th></tr>")
+    for m in history:
+        parts.append("<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td>"
+                     "<td>%d</td><td>%s</td></tr>"
+                     % (m.get("iteration"), _m(m, "volume_pct"),
+                        _m(m, "ct_mean"), _m(m, "iso_mean"),
+                        m.get("n_fail_slices", 0), _m(m, "deficit")))
+    parts.append("</table>")
+    for m in history:
+        it = m.get("iteration")
+        preview = "iter_%d/iso/iso_tfr.png" % it
+        if _exists(preview):
+            parts.append("<h3>Iteration %d</h3>" % it)
+            parts.append("<p>volume %s%%, CT mean %s, iso mean %s, "
+                         "fail slices %d, deficit %s</p>"
+                         % (_m(m, "volume_pct"), _m(m, "ct_mean"),
+                            _m(m, "iso_mean"), m.get("n_fail_slices", 0),
+                            _m(m, "deficit")))
+            parts.append("<img src='%s' alt='iteration %d preview'>"
+                         % (preview, it))
+    # --- final result
+    parts.append("<h2>3. Final result (best iteration %d)</h2>" % best_it)
+    best_preview = "iter_%d/iso/iso_tfr.png" % best_it
+    if _exists(best_preview):
+        parts.append("<img src='%s' alt='final model preview'>"
+                     % best_preview)
+    parts.append("<p>Files: model.fcstd, model.step (the parametric "
+                 "model), build_macro.py (the generated FreeCAD macro), "
+                 "features.json (features + verify + refine_report).</p>")
+    # --- verification detail
+    parts.append("<h2>4. Verification detail</h2>")
+    for key in ("verify", "verify_iso", "verify_ct"):
+        checks = fl.get(key) or []
+        if not checks:
+            continue
+        parts.append("<h3>%s</h3>" % _html.escape(key))
+        parts.append("<table><tr><th>check</th><th>result</th>"
+                     "<th>detail</th></tr>")
+        for c in checks:
+            cls = "ok" if c.get("ok") else "fail"
+            parts.append("<tr><td>%s</td><td class='%s'>%s</td><td>%s</td></tr>"
+                         % (_html.escape(str(c.get("check"))), cls,
+                            "OK" if c.get("ok") else "FAIL",
+                            _html.escape(str(c.get("detail")))))
+        parts.append("</table>")
+    failures = rr.get("failures") or []
+    if failures:
+        parts.append("<h2>5. What is still wrong and where</h2>")
+        for f in failures:
+            parts.append("<p><b>Z %s</b> — %s</p>"
+                         % (_html.escape(str(f.get("z_range"))),
+                            _html.escape(str(f.get("diagnosis", "")))))
+    parts.append("<p>More images: iso/ (original iso views), ct/ "
+                 "(CT slices of the original), iso_check_built/ and "
+                 "iso_check_orig/ (the verify comparison).</p>")
+    parts.append("</body></html>")
+    path = os.path.join(out_dir, "report.html")
+    with open(path, "w") as f:
+        f.write("\n".join(parts))
+    return path
+
+
 def _render_iso(step_path, out_dir):
     """Render 4 isometric views (top/bottom x front/back) + 2x2 montage.
 
@@ -2291,6 +2490,13 @@ def main(argv=None):
         else:
             print("  ", feat["type"], feat.get("name"), feat)
     print("bbox:", fl["bbox"], "volume:", fl["volume_mm3"])
+    # Visual: the recognized features, so the user can SEE what stage 1
+    # found (the intermediate result of recognize(), before any build).
+    try:
+        _plot_features(fl, os.path.join(args.out, "features.png"))
+        print("recognized features plot:", os.path.join(args.out, "features.png"))
+    except Exception as e:
+        print("  features plot failed:", e)
     if args.ct:
         # CT shape-understanding: ADAPTIVE slices -- same rule as the
         # verify_ct_match check, so the edge-count profile shows WHERE
@@ -2419,6 +2625,24 @@ def main(argv=None):
                   m["ct_mean"] if m["ct_mean"] is not None else -1,
                   m["iso_mean"] if m["iso_mean"] is not None else -1,
                   m["n_fail_slices"], m["deficit"]))
+        # Visual: keep this iteration's built model visible. The verify
+        # renders iso_check_built/ (4 shaded views) and model.step are
+        # overwritten by the next iteration, so snapshot them into
+        # iter_<n>/ -- the intermediate result stays on disk.
+        try:
+            import shutil
+            idir = os.path.join(args.out, "iter_%d" % it)
+            os.makedirs(idir, exist_ok=True)
+            src_iso = os.path.join(args.out, "iso_check_built")
+            if os.path.isdir(src_iso):
+                shutil.copytree(src_iso, os.path.join(idir, "iso"),
+                                dirs_exist_ok=True)
+            src_step = os.path.join(args.out, "model.step")
+            if os.path.exists(src_step):
+                shutil.copy2(src_step, os.path.join(idir, "model.step"))
+            print("  iteration %d snapshot: %s" % (it, idir))
+        except Exception as e:
+            print("  iteration snapshot failed:", e)
         if _all_checks_pass(fl):
             status = "pass"
             status_msg = "all checks PASS (iteration %d)" % it
@@ -2505,6 +2729,15 @@ def main(argv=None):
     print("  " + report_msg)
     with open(os.path.join(args.out, "features.json"), "w") as f:
         json.dump(fl, f, indent=2)
+    # Visual report: ONE page showing the intermediate results
+    # (recognized features, every iteration) and the final result
+    # (the best iteration's model), so the user can see it all.
+    try:
+        report_path = _write_report(args.out, fl, history, best_it,
+                                    status, status_msg)
+        print("visual report:", report_path)
+    except Exception as e:
+        print("  report failed:", e)
     return 0
 
 

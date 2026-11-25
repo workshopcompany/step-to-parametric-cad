@@ -1,5 +1,11 @@
-# OCP (OpenCascade bindings, as shipped with build123d)
-OCP>=7.8
+# OCP (OpenCascade bindings). NOTE: the PyPI project named "OCP" is now
+# "Open Collaboration Platform" (0.1.x) and no longer ships the bindings,
+# so "OCP>=7.8" cannot resolve. The bindings are "cadquery-ocp" (7.9.x
+# line; 8.x breaks this repo's OCP API, e.g. TopoDS.Face_s).
+cadquery-ocp>=7.9,<8
 Pillow>=10
 matplotlib>=3.8
 numpy>=1.26
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9

@@ -12,6 +12,12 @@ out/
 model.step
 build_macro.py
 
+# Web UI runtime state (uploads, logs, cached meshes) and part files
+# dropped into step/ by the user — local files, not repo content.
+webui-jobs/
+step/*.step
+step/*.stp
+
 # OS / editor
 .DS_Store
 .vscode/

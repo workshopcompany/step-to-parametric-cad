@@ -100,6 +100,34 @@ silhouette mean IoU** (≥ 0.90) and **CT mean slice IoU** (≥ 0.90)
 all pass. A build that produces the wrong shape is not a success
 even if it does not crash.
 
+## Web UI (Windows: setup.bat, then run_webui.bat)
+
+A browser interface for the same program — no command line needed:
+
+1. Run `setup.bat` once (installs Python packages + finds FreeCAD).
+2. Double-click `run_webui.bat`, or run it from a terminal.
+   It opens http://127.0.0.1:8092 in your browser.
+3. Drop `.step` / `.stp` files into the `step/` folder and pick one
+   from the dropdown (Refresh re-scans the folder), or upload a
+   file. The part shows in 3D right away — drag to rotate.
+4. Press **Run parametric conversion**. The log streams live.
+5. After the run, the 3D viewer compares the original and the built
+   model: **Original / Built / Side-by-side / Overlay / Diff**.
+   In **Diff** mode the built model is coloured by how far each
+   point is from the original surface — green (≤ 0.05 mm), yellow
+   (≤ 0.30 mm), red (> 0.30 mm) — with a histogram summary.
+6. The results section shows the verdict, the metrics, the
+   recognized features image, the visual report (also openable in
+   its own window), every iteration's preview, and downloads for
+   `model.step` / `model.fcstd`.
+7. The **Past runs** dropdown lists the `out/` folders, so you can
+   open an earlier run's model, report and verdict without
+   re-running it.
+
+The web UI calls the existing CLI as a subprocess — the pipeline
+itself is unchanged. See `WEBUI.md` for the API endpoints and
+details.
+
 ## Example
 
 `examples/output_flange.step` is a Ø37 output flange from the

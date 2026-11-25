@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>step2param — STEP to parametric FreeCAD</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --line:#d8dee6; --text:#1c2733;
+          --muted:#5b6b7a; --accent:#2563eb; --ok:#15803d; --warn:#b45309;
+          --bad:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--text); font-size:14px; }
+  header { background:#16232e; color:#fff; padding:10px 16px; }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:#9fb0c0; font-size:12px; }
+  main { max-width:1180px; margin:0 auto; padding:12px 16px 40px; }
+  .card { background:var(--card); border:1px solid var(--line);
+          border-radius:8px; padding:12px 14px; margin-bottom:12px; }
+  .card h2 { margin:0 0 8px; font-size:15px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  label { font-weight:600; }
+  select, input[type=text], input[type=number] { padding:6px 8px; font-size:14px;
+    border:1px solid var(--line); border-radius:6px; background:#fff; }
+  select { min-width:220px; }
+  button { padding:7px 14px; font-size:14px; border-radius:6px; cursor:pointer;
+    border:1px solid var(--line); background:#fff; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.primary:disabled { background:#93b4f5; border-color:#93b4f5; cursor:wait; }
+  button.mode { padding:6px 10px; }
+  button.mode.active { background:#16232e; color:#fff; border-color:#16232e; }
+  .hint { color:var(--muted); font-size:12px; }
+  #viewer { width:100%; height:520px; background:#eef1f4; border:1px solid var(--line);
+            border-radius:8px; position:relative; }
+  #viewer canvas { display:block; border-radius:8px; }
+  #viewerEmpty { position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; color:var(--muted); pointer-events:none; }
+  .toolbar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+  .toolbar .spacer { flex:1; }
+  #log { background:#101820; color:#c8e6c9; font-family:ui-monospace,Consolas,monospace;
+         font-size:12px; white-space:pre-wrap; max-height:260px; overflow:auto;
+         padding:10px; border-radius:6px; margin:0; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:999px; color:#fff;
+           font-weight:700; font-size:13px; }
+  .badge.pass { background:var(--ok); }
+  .badge.needs_decision { background:var(--warn); }
+  .badge.no_improvement { background:var(--bad); }
+  .badge.idle, .badge.running { background:#475569; }
+  table.metrics { border-collapse:collapse; margin:8px 0; }
+  table.metrics td, table.metrics th { border:1px solid var(--line); padding:5px 10px;
+    text-align:left; font-size:13px; }
+  table.metrics th { background:#f0f3f6; }
+  .histbar { height:14px; background:#e2e8f0; border-radius:4px; overflow:hidden; }
+  .histbar > div { height:100%; }
+  .difflegend { display:flex; gap:16px; align-items:center; font-size:12px; }
+  .swatch { display:inline-block; width:12px; height:12px; border-radius:3px; }
+  img.report-img { max-width:100%; border:1px solid var(--line); border-radius:6px; }
+  iframe.report-frame { width:100%; height:560px; border:1px solid var(--line);
+    border-radius:6px; background:#fff; }
+  .iter { border:1px solid var(--line); border-radius:6px; padding:8px; margin:6px 0; }
+  .iter img { max-width:420px; width:100%; border:1px solid var(--line); }
+  a { color:var(--accent); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>step2param</h1>
+  <p>STEP (+ optional 2D drawing) &rarr; parametric FreeCAD model</p>
+</header>
+<main>
+
+  <!-- Pick a part -->
+  <section class="card">
+    <h2>1. Pick a part</h2>
+    <div class="row">
+      <label for="stepSelect">STEP folder (step/):</label>
+      <select id="stepSelect"><option value="">-- choose a STEP file --</option></select>
+      <button id="refreshStepBtn" title="Re-scan the step/ folder">Refresh</button>
+      <span class="hint" id="stepFolderHint"></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label>Or upload:</label>
+      <input type="file" id="stepFile" accept=".step,.stp">
+      <input type="file" id="hlrFile" accept=".json" title="Optional HLR drawing JSON">
+      <span class="hint">HLR .json is optional (cross-check).</span>
+      <button id="uploadBtn">Upload</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="hint" id="jobInfo">No part loaded yet.</span>
+    </div>
+  </section>
+
+  <!-- Run -->
+  <section class="card">
+    <h2>2. Parametric conversion</h2>
+    <div class="row">
+      <label for="refineIter">Refinement iterations:</label>
+      <input type="number" id="refineIter" value="3" min="0" max="10" style="width:64px">
+      <label><input type="checkbox" id="isoCheck" checked> Isometric views (--iso)</label>
+      <label for="fcPath">freecadcmd:</label>
+      <input type="text" id="fcPath" size="46" placeholder="freecadcmd">
+      <span class="hint" id="fcHint"></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="runBtn" class="primary">Run parametric conversion</button>
+      <span class="hint">Runs the same CLI the run.bat uses, in the background.</span>
+    </div>
+    <pre id="log">Log will appear here while the pipeline runs.</pre>
+  </section>
+
+  <!-- 3D viewer -->
+  <section class="card">
+    <h2>3. 3D viewer — original vs built</h2>
+    <div class="toolbar">
+      <button class="mode" data-mode="original">Original</button>
+      <button class="mode" data-mode="built">Built</button>
+      <button class="mode" data-mode="side">Side-by-side</button>
+      <button class="mode" data-mode="overlay">Overlay</button>
+      <button class="mode active" data-mode="diff">Diff (red = differs)</button>
+      <span class="spacer"></span>
+      <label>Overlay opacity <input type="range" id="opacity" min="10" max="100" value="55"></label>
+      <label><input type="checkbox" id="autorotate"> Auto-rotate</label>
+      <label><input type="checkbox" id="gridCheck" checked> Grid</label>
+      <button id="resetViewBtn">Reset view</button>
+    </div>
+    <div id="viewer"><div id="viewerEmpty">Pick a STEP file to see it in 3D.</div></div>
+    <div class="row" style="margin-top:8px">
+      <span class="hint" id="meshInfo"></span>
+    </div>
+    <div id="diffPanel" class="hidden" style="margin-top:8px">
+      <div class="difflegend">
+        <span><span class="swatch" style="background:#0dbf26"></span> &le; 0.05 mm (match)</span>
+        <span><span class="swatch" style="background:#ffcc00"></span> 0.05 – 0.30 mm</span>
+        <span><span class="swatch" style="background:#ff0d0d"></span> &gt; 0.30 mm (differs)</span>
+      </div>
+      <table class="metrics" id="histTable">
+        <tr><th>Within 0.05 mm</th><th>Within 0.1 mm</th><th>Within 0.3 mm</th>
+            <th>Within 1.0 mm</th><th>Mean dev.</th><th>Max dev.</th></tr>
+        <tr><td id="h005">–</td><td id="h01">–</td><td id="h03">–</td>
+            <td id="h10">–</td><td id="hmean">–</td><td id="hmax">–</td></tr>
+      </table>
+      <div class="histbar"><div id="histBar" style="width:0%;background:#0dbf26"></div></div>
+      <span class="hint" id="histNote"></span>
+    </div>
+  </section>
+
+  <!-- Results -->
+  <section class="card">
+    <h2>4. Results</h2>
+    <div class="row">
+      <label for="resultSelect">Past runs (out/):</label>
+      <select id="resultSelect"><option value="">-- choose a past run --</option></select>
+      <button id="refreshResultBtn" title="Re-scan the out/ folder">Refresh</button>
+      <span class="hint">Pick a past run to load its model, report and verdict without re-running.</span>
+    </div>
+    <div id="resultsBody" style="margin-top:10px">
+      <p class="hint">No run finished yet. Run the conversion, or pick a past run above.</p>
+    </div>
+  </section>
+
+</main>
+
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------------------------------------------------------------- state
+let jobId = null;
+let job = null;
+let pollTimer = null;
+let origMesh = null, builtMesh = null;
+let origData = null, builtData = null, diffData = null;
+let mode = 'diff';
+let builtOffsetX = 0;
+
+// ---------------------------------------------------------------- viewer
+const container = document.getElementById('viewer');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xeef1f4);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
+camera.position.set(120, -120, 120);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio || 1);
+container.appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+dirLight.position.set(1, -1, 2);
+scene.add(dirLight);
+const grid = new THREE.GridHelper(200, 20, 0x9aa7b4, 0xc7d0d9);
+grid.rotation.x = Math.PI / 2;
+scene.add(grid);
+const axes = new THREE.AxesHelper(40);
+scene.add(axes);
+
+function resizeViewer() {
+  const w = container.clientWidth, h = container.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeViewer);
+resizeViewer();
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+function meshFromData(data, material) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position',
+    new THREE.Float32BufferAttribute(data.vertices, 3));
+  geo.setIndex(data.triangles);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, material);
+  return mesh;
+}
+
+const origMat = new THREE.MeshStandardMaterial(
+  { color: 0x8fa3b8, metalness: 0.15, roughness: 0.55 });
+const builtMat = new THREE.MeshStandardMaterial(
+  { color: 0x6fae6f, metalness: 0.15, roughness: 0.55 });
+const diffMat = new THREE.MeshStandardMaterial(
+  { vertexColors: true, metalness: 0.1, roughness: 0.6 });
+
+function fitCamera() {
+  let centre = [0, 0, 0], size = 100;
+  const src = origData || builtData;
+  if (src && src.bbox) {
+    const b = src.bbox;
+    centre = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
+    size = Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2], 1);
+  }
+  controls.target.set(centre[0], centre[1], centre[2]);
+  const d = size * 1.9;
+  camera.position.set(centre[0] + d * 0.7, centre[1] - d * 0.7,
+                      centre[2] + d * 0.7);
+  camera.near = Math.max(size / 1000, 0.1);
+  camera.far = size * 100;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+function applyMode() {
+  if (!origMesh && !builtMesh) return;
+  const op = document.getElementById('opacity').value / 100;
+  if (builtMesh) {
+    builtMesh.position.x = 0;
+    builtMesh.material = builtMat;
+    builtMat.transparent = false;
+    builtMat.opacity = 1;
+    diffMat.transparent = false;
+    diffMat.opacity = 1;
+  }
+  if (mode === 'original') {
+    if (origMesh) origMesh.visible = true;
+    if (builtMesh) builtMesh.visible = false;
+  } else if (mode === 'built') {
+    if (origMesh) origMesh.visible = false;
+    if (builtMesh) builtMesh.visible = true;
+  } else if (mode === 'side') {
+    if (origMesh) origMesh.visible = true;
+    if (builtMesh) {
+      builtMesh.visible = true;
+      builtMesh.position.x = builtOffsetX;
+    }
+  } else if (mode === 'overlay') {
+    if (origMesh) origMesh.visible = true;
+    if (builtMesh) {
+      builtMesh.visible = true;
+      builtMesh.material = builtMat;
+      builtMat.transparent = true;
+      builtMat.opacity = op;
+    }
+  } else if (mode === 'diff') {
+    if (origMesh) origMesh.visible = false;
+    if (builtMesh) {
+      builtMesh.visible = true;
+      if (diffData) {
+        builtMesh.material = diffMat;
+      } else {
+        builtMesh.material = builtMat;
+      }
+    }
+  }
+  document.querySelectorAll('button.mode').forEach(
+    b => b.classList.toggle('active', b.dataset.mode === mode));
+}
+
+function showOriginal(data) {
+  origData = data;
+  if (origMesh) { scene.remove(origMesh); origMesh.geometry.dispose(); }
+  origMesh = meshFromData(data, origMat);
+  scene.add(origMesh);
+  const b = data.bbox;
+  builtOffsetX = (b[3] - b[0]) * 1.25 + 5;
+  document.getElementById('viewerEmpty').style.display = 'none';
+  document.getElementById('meshInfo').textContent =
+    'Original: ' + data.n_vertices.toLocaleString() + ' vertices, ' +
+    data.n_triangles.toLocaleString() + ' triangles. ' +
+    'Size: ' + (b[3] - b[0]).toFixed(1) + ' x ' + (b[4] - b[1]).toFixed(1) +
+    ' x ' + (b[5] - b[2]).toFixed(1) + ' mm.';
+  fitCamera();
+  applyMode();
+}
+
+function showBuilt(data) {
+  builtData = data;
+  if (builtMesh) { scene.remove(builtMesh); builtMesh.geometry.dispose(); }
+  builtMesh = meshFromData(data, builtMat);
+  scene.add(builtMesh);
+  applyMode();
+}
+
+function showDiff(data) {
+  diffData = data;
+  if (!builtMesh) { showBuilt(data); }
+  // Attach the per-vertex colours to the built geometry.
+  const geo = builtMesh.geometry;
+  geo.setAttribute('color',
+    new THREE.Float32BufferAttribute(data.colors, 3));
+  const h = data.histogram;
+  document.getElementById('diffPanel').classList.remove('hidden');
+  document.getElementById('h005').textContent = h['within_0.05mm_pct'] + '%';
+  document.getElementById('h01').textContent = h['within_0.1mm_pct'] + '%';
+  document.getElementById('h03').textContent = h['within_0.3mm_pct'] + '%';
+  document.getElementById('h10').textContent = h['within_1.0mm_pct'] + '%';
+  document.getElementById('hmean').textContent = h.mean_mm + ' mm';
+  document.getElementById('hmax').textContent = h.max_mm + ' mm';
+  document.getElementById('histBar').style.width =
+    Math.max(0, Math.min(100, h['within_0.05mm_pct'])) + '%';
+  document.getElementById('histBar').style.background =
+    h['within_0.05mm_pct'] >= 90 ? '#0dbf26' :
+    h['within_0.05mm_pct'] >= 70 ? '#ffcc00' : '#ff0d0d';
+  document.getElementById('histNote').textContent =
+    h.n_vertices.toLocaleString() + ' built vertices measured. ' +
+    'Red areas on the model are where the built shape differs from the original.';
+  applyMode();
+}
+
+// ---------------------------------------------------------------- API
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const t = await r.text();
+  let j = null;
+  try { j = JSON.parse(t); } catch (e) { /* not JSON */ }
+  if (!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+  return j;
+}
+
+function setJob(j) {
+  job = j;
+  jobId = j.job_id;
+  const info = document.getElementById('jobInfo');
+  info.textContent = 'Job ' + j.job_id + ' — ' + (j.step_name || j.name) +
+    (j.datum ? ' — datum [' + j.datum.join(', ') + ']' : '') +
+    (j.has_hlr ? ' — with HLR drawing' : '');
+}
+
+async function loadMeshes() {
+  // Original mesh (always available once a part is loaded).
+  try {
+    const d = await api('/api/job/' + jobId + '/mesh/original');
+    showOriginal(d);
+  } catch (e) {
+    document.getElementById('meshInfo').textContent =
+      'Original mesh failed: ' + e.message;
+  }
+  // Built mesh + diff (only after a run finished).
+  try {
+    const b = await api('/api/job/' + jobId + '/mesh/built');
+    showBuilt(b);
+    try {
+      const df = await api('/api/job/' + jobId + '/mesh/diff');
+      showDiff(df);
+    } catch (e) {
+      document.getElementById('diffPanel').classList.add('hidden');
+    }
+  } catch (e) {
+    // No built model yet — original-only view.
+    if (builtMesh) { scene.remove(builtMesh); builtMesh = null; }
+    diffData = null;
+    document.getElementById('diffPanel').classList.add('hidden');
+    applyMode();
+  }
+}
+
+// ---------------------------------------------------------------- dropdowns
+async function refreshStepFiles() {
+  const sel = document.getElementById('stepSelect');
+  const cur = sel.value;
+  const d = await api('/api/step-files');
+  document.getElementById('stepFolderHint').textContent =
+    d.folder + ' — ' + d.files.length + ' file(s)';
+  sel.innerHTML = '<option value="">-- choose a STEP file --</option>';
+  d.files.forEach(f => {
+    const o = document.createElement('option');
+    o.value = f.name;
+    o.textContent = f.name + ' (' + (f.size / 1024).toFixed(0) + ' KB, ' + f.mtime + ')';
+    sel.appendChild(o);
+  });
+  if (cur) sel.value = cur;
+}
+
+async function refreshResults() {
+  const sel = document.getElementById('resultSelect');
+  const cur = sel.value;
+  const d = await api('/api/results');
+  sel.innerHTML = '<option value="">-- choose a past run --</option>';
+  d.results.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r.name;
+    o.textContent = r.name + ' — ' +
+      (r.status || (r.has_model ? 'done?' : 'no model yet')) +
+      ' (' + r.mtime + ')';
+    sel.appendChild(o);
+  });
+  if (cur) sel.value = cur;
+}
+
+// ---------------------------------------------------------------- results
+function fileUrl(rel) {
+  return '/api/job/' + jobId + '/file/' + rel;
+}
+
+function renderResults(j) {
+  const body = document.getElementById('resultsBody');
+  const r = j.results || {};
+  const m = r.metrics || {};
+  const verdict = r.verdict;
+  let html = '';
+  if (verdict) {
+    const label = verdict === 'pass' ? 'PASS' :
+      verdict === 'needs_decision' ? 'NEEDS DECISION' : 'NO IMPROVEMENT';
+    html += '<p>Verdict: <span class="badge ' + verdict + '">' + label + '</span> ' +
+      (j.results.message ? escapeHtml(j.results.message) : '') + '</p>';
+  } else if (j.status === 'running') {
+    html += '<p><span class="badge running">RUNNING</span> The pipeline is still working — log above.</p>';
+  } else if (j.status === 'failed') {
+    html += '<p><span class="badge no_improvement">FAILED</span> See the log above for the error.</p>';
+  }
+  if (m && m.volume_pct !== null && m.volume_pct !== undefined) {
+    html += '<table class="metrics"><tr><th>Volume error</th><th>ISO mean IoU</th>' +
+      '<th>CT mean IoU</th><th>Failing CT slices</th><th>Deficit</th></tr><tr>' +
+      '<td>' + m.volume_pct + '%</td><td>' + m.iso_mean + '</td><td>' + m.ct_mean +
+      '</td><td>' + m.n_fail_slices + '</td><td>' + m.deficit + '</td></tr></table>';
+  }
+  if (r.files && r.files['model.step']) {
+    html += '<p>Download: <a href="' + fileUrl('model.step') + '" download>model.step</a> &nbsp; ' +
+      (r.files['model.fcstd'] ? '<a href="' + fileUrl('model.fcstd') + '" download>model.fcstd</a>' : '') +
+      '</p>';
+  }
+  if (r.files && r.files['features.png']) {
+    html += '<h3>Recognized features</h3>' +
+      '<p><a href="' + fileUrl('features.png') + '" target="_blank" rel="noopener">' +
+      'Open features image in new window ↗</a></p>' +
+      '<img class="report-img" src="' + fileUrl('features.png') + '" alt="recognized features">';
+  }
+  if (r.files && r.files['report.html']) {
+    html += '<h3>Visual report</h3>' +
+      '<p><a href="' + fileUrl('report.html') + '" target="_blank" rel="noopener">' +
+      'Open report in new window ↗</a> — the full report on its own page.</p>' +
+      '<iframe class="report-frame" src="' + fileUrl('report.html') + '"></iframe>';
+  }
+  if (r.iterations && r.iterations.length) {
+    html += '<h3>Iterations</h3>';
+    r.iterations.forEach(it => {
+      html += '<div class="iter"><strong>' + it.name + '</strong> ';
+      if (it.model_step) {
+        html += '<a href="' + fileUrl(it.name + '/model.step') + '" download>model.step</a> ';
+      }
+      if (it.iso_images && it.iso_images.length) {
+        html += '<br>';
+        it.iso_images.forEach(img => {
+          html += '<img style="max-width:200px" src="' + fileUrl(it.name + '/iso/' + img) +
+            '" alt="' + it.name + ' ' + img + '">';
+        });
+      }
+      html += '</div>';
+    });
+  }
+  if (!html) {
+    html = '<p class="hint">No results yet for this job.</p>';
+  }
+  body.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ---------------------------------------------------------------- polling
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(refreshJob, 2000);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function refreshJob() {
+  if (!jobId) return;
+  try {
+    const j = await api('/api/job/' + jobId);
+    setJob(j);
+    document.getElementById('log').textContent = j.log || '(no log yet)';
+    renderResults(j);
+    if (j.status === 'done' || j.status === 'failed') {
+      stopPolling();
+      document.getElementById('runBtn').disabled = false;
+      document.getElementById('runBtn').textContent = 'Run parametric conversion';
+      if (j.status === 'done') await loadMeshes();
+      await refreshResults();
+    }
+  } catch (e) {
+    stopPolling();
+  }
+}
+
+// ---------------------------------------------------------------- events
+document.getElementById('refreshStepBtn').addEventListener('click', refreshStepFiles);
+document.getElementById('refreshResultBtn').addEventListener('click', refreshResults);
+
+document.getElementById('stepSelect').addEventListener('change', async (e) => {
+  const name = e.target.value;
+  if (!name) return;
+  try {
+    const j = await api('/api/load-step', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }) });
+    setJob(j);
+    document.getElementById('log').textContent = j.log || '';
+    renderResults(j);
+    await loadMeshes();
+  } catch (err) {
+    alert('Could not load ' + name + ': ' + err.message);
+  }
+});
+
+document.getElementById('uploadBtn').addEventListener('click', async () => {
+  const sf = document.getElementById('stepFile').files[0];
+  if (!sf) { alert('Choose a .step / .stp file first.'); return; }
+  const fd = new FormData();
+  fd.append('step', sf);
+  const hf = document.getElementById('hlrFile').files[0];
+  if (hf) fd.append('hlr', hf);
+  try {
+    const j = await api('/api/upload', { method: 'POST', body: fd });
+    setJob(j);
+    document.getElementById('log').textContent = j.log || '';
+    renderResults(j);
+    await loadMeshes();
+    await refreshStepFiles();
+  } catch (err) {
+    alert('Upload failed: ' + err.message);
+  }
+});
+
+document.getElementById('resultSelect').addEventListener('change', async (e) => {
+  const name = e.target.value;
+  if (!name) return;
+  try {
+    const j = await api('/api/load-result', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }) });
+    setJob(j);
+    document.getElementById('log').textContent = j.log || '';
+    renderResults(j);
+    await loadMeshes();
+  } catch (err) {
+    alert('Could not load run ' + name + ': ' + err.message);
+  }
+});
+
+document.getElementById('runBtn').addEventListener('click', async () => {
+  if (!jobId) { alert('Pick or upload a STEP file first.'); return; }
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  const opts = {
+    refine_iter: parseInt(document.getElementById('refineIter').value || '3', 10),
+    iso: document.getElementById('isoCheck').checked,
+    freecadcmd: document.getElementById('fcPath').value.trim() || undefined
+  };
+  try {
+    await api('/api/run/' + jobId, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts) });
+    startPolling();
+    await refreshJob();
+  } catch (err) {
+    alert('Could not start the run: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = 'Run parametric conversion';
+  }
+});
+
+document.querySelectorAll('button.mode').forEach(b => {
+  b.addEventListener('click', () => { mode = b.dataset.mode; applyMode(); });
+});
+document.getElementById('opacity').addEventListener('input', applyMode);
+document.getElementById('autorotate').addEventListener('change', (e) => {
+  controls.autoRotate = e.target.checked;
+  controls.autoRotateSpeed = 1.2;
+});
+document.getElementById('gridCheck').addEventListener('change', (e) => {
+  grid.visible = e.target.checked;
+  axes.visible = e.target.checked;
+});
+document.getElementById('resetViewBtn').addEventListener('click', fitCamera);
+
+// ---------------------------------------------------------------- init
+(async function init() {
+  try {
+    const cfg = await api('/api/config');
+    document.getElementById('fcPath').value = cfg.freecadcmd || '';
+    document.getElementById('fcHint').textContent =
+      '(' + cfg.freecadcmd_source + (cfg.freecadcmd_exists ? '' : ' — not found!') + ')';
+  } catch (e) { /* config optional */ }
+  await refreshStepFiles();
+  await refreshResults();
+})();
+</script>
+</body>
+</html>
